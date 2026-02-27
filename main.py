@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import yt_dlp
 
-app = FastAPI(title="yt-dlp API - High Quality")
+app = FastAPI(title="yt-dlp API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,47 +14,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cookies file path
 COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 
 
 @app.get("/")
 def health():
-    cookies_exist = os.path.exists(COOKIES_FILE)
     return {
         "status": "running",
-        "service": "yt-dlp-api",
-        "quality": "highest available",
-        "cookies": "loaded" if cookies_exist else "not found",
         "endpoints": ["/info", "/video", "/direct-url", "/formats"]
     }
 
 
 @app.get("/info")
 def get_info(url: str):
-    """Extract video metadata without downloading"""
+    """Extract video metadata"""
     try:
-        ydl_opts = {
-            "quiet": True,
-            "no_download": True,
-            "no_warnings": True,
-        }
+        ydl_opts = {"quiet": True, "no_download": True}
         if os.path.exists(COOKIES_FILE):
             ydl_opts["cookiefile"] = COOKIES_FILE
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-
             return {
                 "title": info.get("title"),
                 "description": info.get("description"),
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
-                "view_count": info.get("view_count"),
-                "like_count": info.get("like_count"),
                 "uploader": info.get("uploader"),
-                "upload_date": info.get("upload_date"),
-                "webpage_url": info.get("webpage_url"),
                 "platform": info.get("extractor"),
             }
     except Exception as e:
@@ -65,60 +51,43 @@ def get_info(url: str):
 def get_direct_url(url: str):
     """Get direct video URL"""
     try:
-        ydl_opts = {
-            "quiet": True,
-            "no_download": True,
-            "no_warnings": True,
-            "format": "best",
-        }
+        ydl_opts = {"quiet": True, "no_download": True}
         if os.path.exists(COOKIES_FILE):
             ydl_opts["cookiefile"] = COOKIES_FILE
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            video_url = info.get("url")
 
-            if not video_url and info.get("formats"):
+            # Get URL from formats
+            video_url = None
+            if info.get("formats"):
                 for f in reversed(info.get("formats", [])):
                     if f.get("url"):
                         video_url = f.get("url")
                         break
 
+            if not video_url:
+                video_url = info.get("url")
+
             return {
                 "title": info.get("title"),
                 "direct_url": video_url,
                 "thumbnail": info.get("thumbnail"),
-                "duration": info.get("duration"),
             }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/video")
-def download_video(url: str, quality: str = "best"):
+def download_video(url: str):
     """Download and return video file"""
     try:
         temp_dir = tempfile.mkdtemp()
-        output_path = os.path.join(temp_dir, "video.mp4")
-
-        # Simple format selection that works
-        if quality == "best" or quality == "highest":
-            format_sel = "bv*+ba/b"  # best video + best audio, or best combined
-        elif quality == "1080p":
-            format_sel = "bv*[height<=1080]+ba/b[height<=1080]/b"
-        elif quality == "720p":
-            format_sel = "bv*[height<=720]+ba/b[height<=720]/b"
-        elif quality == "480p":
-            format_sel = "bv*[height<=480]+ba/b[height<=480]/b"
-        else:
-            format_sel = "b"  # best available
+        output_path = os.path.join(temp_dir, "video.%(ext)s")
 
         ydl_opts = {
-            "format": format_sel,
             "outtmpl": output_path,
             "quiet": True,
-            "no_warnings": True,
-            "merge_output_format": "mp4",
         }
         if os.path.exists(COOKIES_FILE):
             ydl_opts["cookiefile"] = COOKIES_FILE
@@ -129,14 +98,17 @@ def download_video(url: str, quality: str = "best"):
             title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
 
         # Find downloaded file
-        if not os.path.exists(output_path):
-            for file in os.listdir(temp_dir):
-                if file.endswith(('.mp4', '.mkv', '.webm')):
-                    output_path = os.path.join(temp_dir, file)
-                    break
+        final_path = None
+        for file in os.listdir(temp_dir):
+            if file.startswith("video."):
+                final_path = os.path.join(temp_dir, file)
+                break
+
+        if not final_path:
+            raise HTTPException(status_code=500, detail="Download failed")
 
         return FileResponse(
-            output_path,
+            final_path,
             media_type="video/mp4",
             filename=f"{title}.mp4"
         )
@@ -147,31 +119,22 @@ def download_video(url: str, quality: str = "best"):
 
 @app.get("/formats")
 def get_formats(url: str):
-    """Get all available formats"""
+    """Get available formats"""
     try:
-        ydl_opts = {
-            "quiet": True,
-            "no_download": True,
-        }
+        ydl_opts = {"quiet": True, "no_download": True}
         if os.path.exists(COOKIES_FILE):
             ydl_opts["cookiefile"] = COOKIES_FILE
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = []
-
             for f in info.get("formats", []):
                 formats.append({
                     "format_id": f.get("format_id"),
                     "ext": f.get("ext"),
                     "resolution": f.get("resolution"),
                     "height": f.get("height"),
-                    "filesize": f.get("filesize"),
                 })
-
-            return {
-                "title": info.get("title"),
-                "formats": formats
-            }
+            return {"title": info.get("title"), "formats": formats}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
