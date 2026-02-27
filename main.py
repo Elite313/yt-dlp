@@ -17,6 +17,19 @@ app.add_middleware(
 COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 
 
+def get_ydl_opts():
+    """Get base yt-dlp options that work"""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        # Use android client to bypass restrictions
+        "extractor_args": {"youtube": {"player_client": ["android"]}},
+    }
+    if os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
+    return opts
+
+
 @app.get("/")
 def health():
     return {
@@ -29,9 +42,8 @@ def health():
 def get_info(url: str):
     """Extract video metadata"""
     try:
-        ydl_opts = {"quiet": True, "no_download": True}
-        if os.path.exists(COOKIES_FILE):
-            ydl_opts["cookiefile"] = COOKIES_FILE
+        ydl_opts = get_ydl_opts()
+        ydl_opts["no_download"] = True
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -51,14 +63,12 @@ def get_info(url: str):
 def get_direct_url(url: str):
     """Get direct video URL"""
     try:
-        ydl_opts = {"quiet": True, "no_download": True}
-        if os.path.exists(COOKIES_FILE):
-            ydl_opts["cookiefile"] = COOKIES_FILE
+        ydl_opts = get_ydl_opts()
+        ydl_opts["no_download"] = True
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-            # Get URL from formats
             video_url = None
             if info.get("formats"):
                 for f in reversed(info.get("formats", [])):
@@ -85,12 +95,10 @@ def download_video(url: str):
         temp_dir = tempfile.mkdtemp()
         output_path = os.path.join(temp_dir, "video.%(ext)s")
 
-        ydl_opts = {
-            "outtmpl": output_path,
-            "quiet": True,
-        }
-        if os.path.exists(COOKIES_FILE):
-            ydl_opts["cookiefile"] = COOKIES_FILE
+        ydl_opts = get_ydl_opts()
+        ydl_opts["outtmpl"] = output_path
+        # Force format 18 (360p mp4) as fallback - always available
+        ydl_opts["format"] = "18/best"
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -121,9 +129,8 @@ def download_video(url: str):
 def get_formats(url: str):
     """Get available formats"""
     try:
-        ydl_opts = {"quiet": True, "no_download": True}
-        if os.path.exists(COOKIES_FILE):
-            ydl_opts["cookiefile"] = COOKIES_FILE
+        ydl_opts = get_ydl_opts()
+        ydl_opts["no_download"] = True
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
