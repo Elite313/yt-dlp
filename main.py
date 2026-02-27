@@ -18,17 +18,22 @@ COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 PROXY_URL = os.getenv("PROXY_URL", "http://zdqongkx:7ahra7x6reqc@198.23.239.134:6540")
 
 
-def get_ydl_opts():
+def get_ydl_opts(for_download=False):
     opts = {
         "quiet": True,
         "no_warnings": True,
-        "proxy": PROXY_URL,
         "socket_timeout": 60,
-        # Use android client to bypass YouTube restrictions
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+        # Use iOS client - most reliable for bypassing restrictions
+        "extractor_args": {"youtube": {"player_client": ["ios", "android"]}},
     }
+    # Only use proxy if needed
+    if PROXY_URL:
+        opts["proxy"] = PROXY_URL
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
+    # For downloads, use format that doesn't require merging
+    if for_download:
+        opts["format"] = "best[ext=mp4]/best"
     return opts
 
 
@@ -76,10 +81,8 @@ def download_video(url: str):
     try:
         temp_dir = tempfile.mkdtemp()
 
-        ydl_opts = get_ydl_opts()
+        ydl_opts = get_ydl_opts(for_download=True)
         ydl_opts["outtmpl"] = os.path.join(temp_dir, "%(id)s.%(ext)s")
-
-        # Let yt-dlp auto-select the best available format
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
