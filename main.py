@@ -23,17 +23,13 @@ def get_ydl_opts(for_download=False):
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 60,
-        # Use iOS client - most reliable for bypassing restrictions
-        "extractor_args": {"youtube": {"player_client": ["ios", "android"]}},
+        # Let yt-dlp use default client
     }
-    # Only use proxy if needed
-    if PROXY_URL:
-        opts["proxy"] = PROXY_URL
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
-    # For downloads, use format that doesn't require merging
+    # For downloads, select any available format
     if for_download:
-        opts["format"] = "best[ext=mp4]/best"
+        opts["format"] = "best/bestvideo+bestaudio"
     return opts
 
 
