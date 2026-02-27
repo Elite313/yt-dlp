@@ -16,24 +16,22 @@ app.add_middleware(
 
 COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 
-# Optional: Set paid proxy in Railway Variables
-PROXY_URL = os.getenv("PROXY_URL", None)
+# WebShare Proxy
+PROXY_URL = os.getenv("PROXY_URL", "http://zdqongkx:7ahra7x6reqc@31.59.20.176:6754")
 
 
 def get_ydl_opts():
-    """Get yt-dlp options"""
+    """Get yt-dlp options with proxy"""
     opts = {
         "quiet": True,
         "no_warnings": True,
         "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         "socket_timeout": 30,
+        "proxy": PROXY_URL,
     }
 
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
-
-    if PROXY_URL:
-        opts["proxy"] = PROXY_URL
 
     return opts
 
@@ -42,7 +40,7 @@ def get_ydl_opts():
 def health():
     return {
         "status": "running",
-        "proxy": "configured" if PROXY_URL else "none",
+        "proxy": "webshare",
         "endpoints": ["/info", "/video", "/direct-url", "/formats"]
     }
 
@@ -99,14 +97,13 @@ def get_direct_url(url: str):
 
 @app.get("/video")
 def download_video(url: str):
-    """Download and return video file"""
+    """Download and return video file via proxy"""
     try:
         temp_dir = tempfile.mkdtemp()
         output_path = os.path.join(temp_dir, "video.%(ext)s")
 
         ydl_opts = get_ydl_opts()
         ydl_opts["outtmpl"] = output_path
-        # Don't specify format - let yt-dlp choose
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
