@@ -24,7 +24,8 @@ def get_ydl_opts():
         "no_warnings": True,
         "proxy": PROXY_URL,
         "socket_timeout": 60,
-        # No format restriction - let yt-dlp choose
+        # Use android client to bypass YouTube restrictions
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
@@ -78,8 +79,7 @@ def download_video(url: str):
         ydl_opts = get_ydl_opts()
         ydl_opts["outtmpl"] = os.path.join(temp_dir, "%(id)s.%(ext)s")
 
-        # Try to get any available format
-        ydl_opts["format"] = "b/best/worst"
+        # Let yt-dlp auto-select the best available format
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
