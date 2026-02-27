@@ -15,7 +15,7 @@ app.add_middleware(
 )
 
 COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
-PROXY_URL = os.getenv("PROXY_URL", "http://zdqongkx:7ahra7x6reqc@198.23.239.134:6540")
+PROXY_URL = os.getenv("PROXY_URL", "http://zdqongkx:7ahra7x6reqc@31.59.20.176:6754")
 
 
 def get_ydl_opts(for_download=False):
