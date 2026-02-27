@@ -23,13 +23,13 @@ def get_ydl_opts(for_download=False):
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 60,
-        # Let yt-dlp use default client
+        # Use US proxy to bypass geo-blocking
+        "proxy": PROXY_URL,
+        # Use mweb client which works better with proxies
+        "extractor_args": {"youtube": {"player_client": ["mweb", "web"]}},
     }
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
-    # For downloads, select any available format
-    if for_download:
-        opts["format"] = "best/bestvideo+bestaudio"
     return opts
 
 
