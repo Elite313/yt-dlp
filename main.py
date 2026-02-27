@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import yt_dlp
 
-app = FastAPI(title="yt-dlp API")
+app = FastAPI(title="yt-dlp API - High Quality")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,10 +14,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Cookies file path
+COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
+
 
 @app.get("/")
 def health():
-    return {"status": "running", "service": "yt-dlp-api", "quality": "highest"}
+    cookies_exist = os.path.exists(COOKIES_FILE)
+    return {
+        "status": "running",
+        "service": "yt-dlp-api",
+        "quality": "highest (1080p+)",
+        "cookies": "loaded" if cookies_exist else "not found"
+    }
 
 
 @app.get("/info")
@@ -28,6 +37,7 @@ def get_info(url: str):
             "quiet": True,
             "no_download": True,
             "no_warnings": True,
+            "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -53,13 +63,12 @@ def get_info(url: str):
 def get_direct_url(url: str, quality: str = "highest"):
     """Get direct video URL"""
     try:
-        # Format selection based on quality
         if quality == "highest":
             format_sel = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        elif quality == "1080p":
+            format_sel = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]"
         elif quality == "720p":
             format_sel = "best[height<=720][ext=mp4]/best[height<=720]/best"
-        elif quality == "480p":
-            format_sel = "best[height<=480][ext=mp4]/best[height<=480]/best"
         else:
             format_sel = "best[ext=mp4]/best"
 
@@ -68,7 +77,7 @@ def get_direct_url(url: str, quality: str = "highest"):
             "no_download": True,
             "no_warnings": True,
             "format": format_sel,
-            "extractor_args": {"youtube": {"player_client": ["android"]}}
+            "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -96,21 +105,21 @@ def get_direct_url(url: str, quality: str = "highest"):
 
 @app.get("/video")
 def download_video(url: str, quality: str = "highest"):
-    """Download and return video file in highest quality"""
+    """Download and return video file in highest quality (1080p+)"""
     try:
         temp_dir = tempfile.mkdtemp()
         output_path = os.path.join(temp_dir, "video.mp4")
 
-        # Format selection for highest quality
-        # This gets best video + best audio and merges them
+        # Format selection for highest quality with audio
         if quality == "highest":
-            format_sel = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best"
+            # Try to get 1080p or higher with best audio
+            format_sel = "bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
         elif quality == "1080p":
-            format_sel = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best"
+            format_sel = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]"
         elif quality == "720p":
-            format_sel = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best"
+            format_sel = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]"
         elif quality == "480p":
-            format_sel = "best[height<=480][ext=mp4]/best"
+            format_sel = "best[height<=480][ext=mp4]/best[height<=480]"
         else:
             format_sel = "best[ext=mp4]/best"
 
@@ -119,10 +128,9 @@ def download_video(url: str, quality: str = "highest"):
             "outtmpl": output_path,
             "quiet": True,
             "no_warnings": True,
-            "extractor_args": {"youtube": {"player_client": ["android"]}},
+            "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
             # Merge video + audio into mp4
             "merge_output_format": "mp4",
-            # Post-processing
             "postprocessors": [{
                 "key": "FFmpegVideoConvertor",
                 "preferedformat": "mp4",
@@ -132,10 +140,11 @@ def download_video(url: str, quality: str = "highest"):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get("title", "video")
+            # Clean title for filename
+            title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
 
-        # Check if file exists (might have different extension after merge)
+        # Check if file exists
         if not os.path.exists(output_path):
-            # Try to find the downloaded file
             for file in os.listdir(temp_dir):
                 if file.endswith(('.mp4', '.mkv', '.webm')):
                     output_path = os.path.join(temp_dir, file)
@@ -153,12 +162,12 @@ def download_video(url: str, quality: str = "highest"):
 
 @app.get("/formats")
 def get_formats(url: str):
-    """Get all available formats with quality info"""
+    """Get all available formats"""
     try:
         ydl_opts = {
             "quiet": True,
             "no_download": True,
-            "extractor_args": {"youtube": {"player_client": ["android"]}}
+            "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -180,6 +189,7 @@ def get_formats(url: str):
 
             return {
                 "title": info.get("title"),
+                "best_quality": f"{info.get('height', 'N/A')}p" if info.get('height') else "N/A",
                 "formats": formats
             }
     except Exception as e:
