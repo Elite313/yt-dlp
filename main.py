@@ -24,8 +24,9 @@ def health():
     return {
         "status": "running",
         "service": "yt-dlp-api",
-        "quality": "highest (1080p+)",
-        "cookies": "loaded" if cookies_exist else "not found"
+        "quality": "highest available",
+        "cookies": "loaded" if cookies_exist else "not found",
+        "endpoints": ["/info", "/video", "/direct-url", "/formats"]
     }
 
 
@@ -37,8 +38,9 @@ def get_info(url: str):
             "quiet": True,
             "no_download": True,
             "no_warnings": True,
-            "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
         }
+        if os.path.exists(COOKIES_FILE):
+            ydl_opts["cookiefile"] = COOKIES_FILE
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -60,25 +62,17 @@ def get_info(url: str):
 
 
 @app.get("/direct-url")
-def get_direct_url(url: str, quality: str = "highest"):
+def get_direct_url(url: str):
     """Get direct video URL"""
     try:
-        if quality == "highest":
-            format_sel = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-        elif quality == "1080p":
-            format_sel = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]"
-        elif quality == "720p":
-            format_sel = "best[height<=720][ext=mp4]/best[height<=720]/best"
-        else:
-            format_sel = "best[ext=mp4]/best"
-
         ydl_opts = {
             "quiet": True,
             "no_download": True,
             "no_warnings": True,
-            "format": format_sel,
-            "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
+            "format": "best",
         }
+        if os.path.exists(COOKIES_FILE):
+            ydl_opts["cookiefile"] = COOKIES_FILE
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -86,64 +80,55 @@ def get_direct_url(url: str, quality: str = "highest"):
 
             if not video_url and info.get("formats"):
                 for f in reversed(info.get("formats", [])):
-                    if f.get("url") and f.get("ext") == "mp4":
+                    if f.get("url"):
                         video_url = f.get("url")
                         break
-                if not video_url:
-                    video_url = info["formats"][-1].get("url")
 
             return {
                 "title": info.get("title"),
                 "direct_url": video_url,
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
-                "resolution": info.get("resolution"),
             }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/video")
-def download_video(url: str, quality: str = "highest"):
-    """Download and return video file in highest quality (1080p+)"""
+def download_video(url: str, quality: str = "best"):
+    """Download and return video file"""
     try:
         temp_dir = tempfile.mkdtemp()
         output_path = os.path.join(temp_dir, "video.mp4")
 
-        # Format selection for highest quality with audio
-        if quality == "highest":
-            # Try to get 1080p or higher with best audio
-            format_sel = "bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+        # Simple format selection that works
+        if quality == "best" or quality == "highest":
+            format_sel = "bv*+ba/b"  # best video + best audio, or best combined
         elif quality == "1080p":
-            format_sel = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]"
+            format_sel = "bv*[height<=1080]+ba/b[height<=1080]/b"
         elif quality == "720p":
-            format_sel = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]"
+            format_sel = "bv*[height<=720]+ba/b[height<=720]/b"
         elif quality == "480p":
-            format_sel = "best[height<=480][ext=mp4]/best[height<=480]"
+            format_sel = "bv*[height<=480]+ba/b[height<=480]/b"
         else:
-            format_sel = "best[ext=mp4]/best"
+            format_sel = "b"  # best available
 
         ydl_opts = {
             "format": format_sel,
             "outtmpl": output_path,
             "quiet": True,
             "no_warnings": True,
-            "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
-            # Merge video + audio into mp4
             "merge_output_format": "mp4",
-            "postprocessors": [{
-                "key": "FFmpegVideoConvertor",
-                "preferedformat": "mp4",
-            }],
         }
+        if os.path.exists(COOKIES_FILE):
+            ydl_opts["cookiefile"] = COOKIES_FILE
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get("title", "video")
-            # Clean title for filename
             title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
 
-        # Check if file exists
+        # Find downloaded file
         if not os.path.exists(output_path):
             for file in os.listdir(temp_dir):
                 if file.endswith(('.mp4', '.mkv', '.webm')):
@@ -167,8 +152,9 @@ def get_formats(url: str):
         ydl_opts = {
             "quiet": True,
             "no_download": True,
-            "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
         }
+        if os.path.exists(COOKIES_FILE):
+            ydl_opts["cookiefile"] = COOKIES_FILE
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -180,16 +166,11 @@ def get_formats(url: str):
                     "ext": f.get("ext"),
                     "resolution": f.get("resolution"),
                     "height": f.get("height"),
-                    "width": f.get("width"),
-                    "fps": f.get("fps"),
                     "filesize": f.get("filesize"),
-                    "vcodec": f.get("vcodec"),
-                    "acodec": f.get("acodec"),
                 })
 
             return {
                 "title": info.get("title"),
-                "best_quality": f"{info.get('height', 'N/A')}p" if info.get('height') else "N/A",
                 "formats": formats
             }
     except Exception as e:
