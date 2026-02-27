@@ -15,52 +15,39 @@ app.add_middleware(
 )
 
 COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
-
-# WebShare Proxy
 PROXY_URL = os.getenv("PROXY_URL", "http://zdqongkx:7ahra7x6reqc@31.59.20.176:6754")
 
 
 def get_ydl_opts():
-    """Get yt-dlp options with proxy"""
     opts = {
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
-        "socket_timeout": 30,
         "proxy": PROXY_URL,
+        "socket_timeout": 60,
+        # No format restriction - let yt-dlp choose
     }
-
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
-
     return opts
 
 
 @app.get("/")
 def health():
-    return {
-        "status": "running",
-        "proxy": "webshare",
-        "endpoints": ["/info", "/video", "/direct-url", "/formats"]
-    }
+    return {"status": "running", "proxy": "webshare"}
 
 
 @app.get("/info")
 def get_info(url: str):
-    """Extract video metadata"""
     try:
         ydl_opts = get_ydl_opts()
         ydl_opts["no_download"] = True
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return {
                 "title": info.get("title"),
-                "description": info.get("description"),
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
                 "uploader": info.get("uploader"),
-                "platform": info.get("extractor"),
             }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -68,60 +55,53 @@ def get_info(url: str):
 
 @app.get("/direct-url")
 def get_direct_url(url: str):
-    """Get direct video URL"""
     try:
         ydl_opts = get_ydl_opts()
         ydl_opts["no_download"] = True
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-
             video_url = None
-            if info.get("formats"):
-                for f in reversed(info.get("formats", [])):
-                    if f.get("url"):
-                        video_url = f.get("url")
-                        break
-
-            if not video_url:
-                video_url = info.get("url")
-
-            return {
-                "title": info.get("title"),
-                "direct_url": video_url,
-                "thumbnail": info.get("thumbnail"),
-            }
+            for f in reversed(info.get("formats", [])):
+                if f.get("url"):
+                    video_url = f.get("url")
+                    break
+            return {"title": info.get("title"), "direct_url": video_url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/video")
 def download_video(url: str):
-    """Download and return video file via proxy"""
     try:
         temp_dir = tempfile.mkdtemp()
-        output_path = os.path.join(temp_dir, "video.%(ext)s")
 
         ydl_opts = get_ydl_opts()
-        ydl_opts["outtmpl"] = output_path
+        ydl_opts["outtmpl"] = os.path.join(temp_dir, "%(id)s.%(ext)s")
+
+        # Try to get any available format
+        ydl_opts["format"] = "b/best/worst"
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get("title", "video")
             title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
+            video_id = info.get("id", "video")
+            ext = info.get("ext", "mp4")
 
-        # Find downloaded file
-        final_path = None
-        for file in os.listdir(temp_dir):
-            if file.startswith("video."):
-                final_path = os.path.join(temp_dir, file)
+        # Find the downloaded file
+        downloaded_file = os.path.join(temp_dir, f"{video_id}.{ext}")
+
+        if not os.path.exists(downloaded_file):
+            # Search for any file in temp_dir
+            for f in os.listdir(temp_dir):
+                downloaded_file = os.path.join(temp_dir, f)
                 break
 
-        if not final_path:
-            raise HTTPException(status_code=500, detail="Download failed")
+        if not os.path.exists(downloaded_file):
+            raise HTTPException(status_code=500, detail="Download failed - no file found")
 
         return FileResponse(
-            final_path,
+            downloaded_file,
             media_type="video/mp4",
             filename=f"{title}.mp4"
         )
@@ -132,21 +112,19 @@ def download_video(url: str):
 
 @app.get("/formats")
 def get_formats(url: str):
-    """Get available formats"""
     try:
         ydl_opts = get_ydl_opts()
         ydl_opts["no_download"] = True
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = []
             for f in info.get("formats", []):
                 formats.append({
-                    "format_id": f.get("format_id"),
+                    "id": f.get("format_id"),
                     "ext": f.get("ext"),
-                    "resolution": f.get("resolution"),
-                    "height": f.get("height"),
+                    "res": f.get("resolution"),
+                    "h": f.get("height"),
                 })
-            return {"title": info.get("title"), "formats": formats}
+            return {"formats": formats}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
