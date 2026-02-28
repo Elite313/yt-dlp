@@ -34,19 +34,49 @@ PROXY_LIST = [
 def get_random_proxy():
     return random.choice(PROXY_LIST)
 
+# Different client strategies to try
+CLIENT_STRATEGIES = [
+    ["tv_embedded"],
+    ["web"],
+    ["mweb"],
+    ["android"],
+    [],  # No client specification - let yt-dlp decide
+]
 
-def get_ydl_opts():
+def get_ydl_opts(client_index=0):
     proxy = get_random_proxy()
     opts = {
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 60,
         "proxy": proxy,
-        "extractor_args": {"youtube": {"player_client": ["mweb", "web"]}},
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        },
     }
+    # Apply client strategy if specified
+    if client_index < len(CLIENT_STRATEGIES) and CLIENT_STRATEGIES[client_index]:
+        opts["extractor_args"] = {"youtube": {"player_client": CLIENT_STRATEGIES[client_index]}}
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
     return opts
+
+def extract_with_retry(url, download=False, outtmpl=None):
+    """Try multiple strategies until one works"""
+    last_error = None
+    for i in range(len(CLIENT_STRATEGIES)):
+        try:
+            ydl_opts = get_ydl_opts(client_index=i)
+            if not download:
+                ydl_opts["no_download"] = True
+            if outtmpl:
+                ydl_opts["outtmpl"] = outtmpl
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=download)
+        except Exception as e:
+            last_error = e
+            continue
+    raise last_error
 
 
 @app.get("/")
@@ -57,16 +87,13 @@ def health():
 @app.get("/info")
 def get_info(url: str):
     try:
-        ydl_opts = get_ydl_opts()
-        ydl_opts["no_download"] = True
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return {
-                "title": info.get("title"),
-                "thumbnail": info.get("thumbnail"),
-                "duration": info.get("duration"),
-                "uploader": info.get("uploader"),
-            }
+        info = extract_with_retry(url, download=False)
+        return {
+            "title": info.get("title"),
+            "thumbnail": info.get("thumbnail"),
+            "duration": info.get("duration"),
+            "uploader": info.get("uploader"),
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -74,16 +101,13 @@ def get_info(url: str):
 @app.get("/direct-url")
 def get_direct_url(url: str):
     try:
-        ydl_opts = get_ydl_opts()
-        ydl_opts["no_download"] = True
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            video_url = None
-            for f in reversed(info.get("formats", [])):
-                if f.get("url"):
-                    video_url = f.get("url")
-                    break
-            return {"title": info.get("title"), "direct_url": video_url}
+        info = extract_with_retry(url, download=False)
+        video_url = None
+        for f in reversed(info.get("formats", [])):
+            if f.get("url"):
+                video_url = f.get("url")
+                break
+        return {"title": info.get("title"), "direct_url": video_url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -92,16 +116,13 @@ def get_direct_url(url: str):
 def download_video(url: str):
     try:
         temp_dir = tempfile.mkdtemp()
+        outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
 
-        ydl_opts = get_ydl_opts()
-        ydl_opts["outtmpl"] = os.path.join(temp_dir, "%(id)s.%(ext)s")
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = info.get("title", "video")
-            title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
-            video_id = info.get("id", "video")
-            ext = info.get("ext", "mp4")
+        info = extract_with_retry(url, download=True, outtmpl=outtmpl)
+        title = info.get("title", "video")
+        title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
+        video_id = info.get("id", "video")
+        ext = info.get("ext", "mp4")
 
         # Find the downloaded file
         downloaded_file = os.path.join(temp_dir, f"{video_id}.{ext}")
@@ -128,18 +149,15 @@ def download_video(url: str):
 @app.get("/formats")
 def get_formats(url: str):
     try:
-        ydl_opts = get_ydl_opts()
-        ydl_opts["no_download"] = True
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            formats = []
-            for f in info.get("formats", []):
-                formats.append({
-                    "id": f.get("format_id"),
-                    "ext": f.get("ext"),
-                    "res": f.get("resolution"),
-                    "h": f.get("height"),
-                })
-            return {"formats": formats}
+        info = extract_with_retry(url, download=False)
+        formats = []
+        for f in info.get("formats", []):
+            formats.append({
+                "id": f.get("format_id"),
+                "ext": f.get("ext"),
+                "res": f.get("resolution"),
+                "h": f.get("height"),
+            })
+        return {"formats": formats}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
