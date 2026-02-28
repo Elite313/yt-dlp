@@ -44,15 +44,11 @@ CLIENT_STRATEGIES = [
 ]
 
 def get_ydl_opts(client_index=0):
-    proxy = get_random_proxy()
     opts = {
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 60,
-        "proxy": proxy,
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        },
+        # No proxy - using Railway's direct connection
     }
     # Apply client strategy if specified
     if client_index < len(CLIENT_STRATEGIES) and CLIENT_STRATEGIES[client_index]:
